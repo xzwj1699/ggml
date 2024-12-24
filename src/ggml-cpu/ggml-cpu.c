@@ -14140,13 +14140,11 @@ struct ggml_cplan ggml_graph_plan(
 }
 
 static thread_ret_t ggml_graph_compute_thread(void * data) {
-    struct timespec start, end;
-    struct timespec time1, time2, time3;
+    // struct timespec start, end;
+    // struct timespec time1, time2, time3;
     // clock_gettime(CLOCK_MONOTONIC, &time1);
     struct ggml_compute_state * state = (struct ggml_compute_state *) data;
     struct ggml_threadpool    * tp    = state->threadpool;
-    // printf("n_graph: %d, num-worker: %d, prio: %d, poll: %d\n", tp->n_graph, tp->n_threads_max, tp->prio, tp->poll);
-    // printf("ggml status: %d\n", tp->ec);
     const struct ggml_cgraph * cgraph = tp->cgraph;
     const struct ggml_cplan  * cplan  = tp->cplan;
 
@@ -14159,15 +14157,15 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         /*.wdata     =*/ cplan->work_data,
         /*.threadpool=*/ tp,
     };
-    clock_gettime(CLOCK_MONOTONIC, &time2);
+    // clock_gettime(CLOCK_MONOTONIC, &time2);
 
     for (int node_n = 0; node_n < cgraph->n_nodes && !tp->abort; node_n++) {
         struct ggml_tensor * node = cgraph->nodes[node_n];
-        ggml_barrier(state->threadpool);
+        // ggml_barrier(state->threadpool);
         // if (state->ith == 0 && node->op == GGML_OP_FLASH_ATTN_EXT) {
-        if (state->ith == 0) {
-            clock_gettime(CLOCK_MONOTONIC, &start);
-        }
+        // if (state->ith == 0) {
+        //     clock_gettime(CLOCK_MONOTONIC, &start);
+        // }
         ggml_compute_forward(&params, node);
 
         if (state->ith == 0 && cplan->abort_callback &&
@@ -14178,19 +14176,19 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
 
         ggml_barrier(state->threadpool);
         // if (state->ith == 0 && node->op == GGML_OP_FLASH_ATTN_EXT) {
-        if (state->ith == 0) {
-            clock_gettime(CLOCK_MONOTONIC, &end);  // 获取结束时刻
-            double time_taken = (end.tv_sec - start.tv_sec) * 1000000.0 + (end.tv_nsec - start.tv_nsec) / 1000.0;
-            printf("node %d time taken: %f us\n", node_n, time_taken);
-        }
+        // if (state->ith == 0) {
+        //     clock_gettime(CLOCK_MONOTONIC, &end);  // 获取结束时刻
+        //     double time_taken = (end.tv_sec - start.tv_sec) * 1000000.0 + (end.tv_nsec - start.tv_nsec) / 1000.0;
+        //     printf("node %d time taken: %f us\n", node_n, time_taken);
+        // }
     }
-    clock_gettime(CLOCK_MONOTONIC, &time3);
-    if (state->ith == 0) {
+    // clock_gettime(CLOCK_MONOTONIC, &time3);
+    // if (state->ith == 0) {
         // double time_taken_1 = (time2.tv_sec - time1.tv_sec) * 1000000.0 + (time2.tv_nsec - time1.tv_nsec) / 1000.0;
-        double time_taken_2 = (time3.tv_sec - time2.tv_sec) * 1000000.0 + (time3.tv_nsec - time2.tv_nsec) / 1000.0;
+        // double time_taken_2 = (time3.tv_sec - time2.tv_sec) * 1000000.0 + (time3.tv_nsec - time2.tv_nsec) / 1000.0;
         // printf("In OMP worker thread, time taken 1: %f us\n", time_taken_1);
-        printf("In OMP worker thread, time taken 2: %f us\n", time_taken_2);
-    }
+        // printf("In OMP worker thread, time taken 2: %f us\n", time_taken_2);
+    // }
     return 0;
 }
 
@@ -14413,8 +14411,8 @@ struct ggml_threadpool * ggml_threadpool_new(struct ggml_threadpool_params * tpp
 }
 
 enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cplan * cplan) {
-    struct timespec time1, time2, time3, time4, time5;
-    clock_gettime(CLOCK_MONOTONIC, &time1);
+    // struct timespec time1, time2, time3, time4, time5;
+    // clock_gettime(CLOCK_MONOTONIC, &time1);
     ggml_cpu_init();
 
     GGML_ASSERT(cplan);
@@ -14425,7 +14423,7 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
     struct ggml_threadpool * threadpool = cplan->threadpool;
 
     bool disposable_threadpool = false;
-    clock_gettime(CLOCK_MONOTONIC, &time2);
+    // clock_gettime(CLOCK_MONOTONIC, &time2);
     if (threadpool == NULL) {
         //GGML_PRINT_DEBUG("Threadpool is not specified. Will create a disposable threadpool : n_threads %d\n", n_threads);
         disposable_threadpool = true;
@@ -14441,7 +14439,7 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
         threadpool->abort            = false;
         threadpool->ec               = GGML_STATUS_SUCCESS;
     }
-    clock_gettime(CLOCK_MONOTONIC, &time3);
+    // clock_gettime(CLOCK_MONOTONIC, &time3);
 
 #ifdef GGML_USE_OPENMP
     if (n_threads > 1) {
@@ -14469,7 +14467,7 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
     // This is a work thread too
     ggml_graph_compute_thread(&threadpool->workers[0]);
 #endif
-    clock_gettime(CLOCK_MONOTONIC, &time4);
+    // clock_gettime(CLOCK_MONOTONIC, &time4);
 
     // don't leave affinity set on the main thread
     clear_numa_thread_affinity();
@@ -14479,15 +14477,15 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
     if (disposable_threadpool) {
         ggml_threadpool_free(threadpool);
     }
-    clock_gettime(CLOCK_MONOTONIC, &time5);
+    // clock_gettime(CLOCK_MONOTONIC, &time5);
 
     // double time_taken_1 = (time2.tv_sec - time1.tv_sec) * 1000000.0 + (time2.tv_nsec - time1.tv_nsec) / 1000.0;
     // double time_taken_2 = (time3.tv_sec - time2.tv_sec) * 1000000.0 + (time3.tv_nsec - time2.tv_nsec) / 1000.0;
-    double time_taken_3 = (time4.tv_sec - time3.tv_sec) * 1000000.0 + (time4.tv_nsec - time3.tv_nsec) / 1000.0;
+    // double time_taken_3 = (time4.tv_sec - time3.tv_sec) * 1000000.0 + (time4.tv_nsec - time3.tv_nsec) / 1000.0;
     // double time_taken_4 = (time5.tv_sec - time4.tv_sec) * 1000000.0 + (time5.tv_nsec - time4.tv_nsec) / 1000.0;
     // printf("Duration time 1: %f us\n", time_taken_1);
     // printf("Duration time 2: %f us\n", time_taken_2);
-    printf("Duration time 3: %f us\n", time_taken_3);
+    // printf("Duration time 3: %f us\n", time_taken_3);
     // printf("Duration time 4: %f us\n", time_taken_4);
 
     return ret;
