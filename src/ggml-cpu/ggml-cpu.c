@@ -10756,8 +10756,8 @@ static void ggml_compute_forward_flash_attn_ext_f16(
     // ggml_print_tensor_fa(v);
     // ggml_print_tensor_fa(dst);
 
-    GGML_TENSOR_LOCALS(int64_t, neq, q,   ne)
-    GGML_TENSOR_LOCALS(size_t,  nbq, q,   nb)
+    GGML_TENSOR_LOCALS(int64_t, neq, q,   ne) // shape
+    GGML_TENSOR_LOCALS(size_t,  nbq, q,   nb) // stride
     GGML_TENSOR_LOCALS(int64_t, nek, k,   ne)
     GGML_TENSOR_LOCALS(size_t,  nbk, k,   nb)
     GGML_TENSOR_LOCALS(int64_t, nev, v,   ne)
@@ -10784,7 +10784,6 @@ static void ggml_compute_forward_flash_attn_ext_f16(
     GGML_ASSERT(nev0 == D);
 
     GGML_ASSERT(neq1 == N);
-    GGML_ASSERT(nev0 == D);
 
     // dst cannot be transposed or permuted
     GGML_ASSERT(nb0 == sizeof(float));
@@ -10793,8 +10792,8 @@ static void ggml_compute_forward_flash_attn_ext_f16(
     GGML_ASSERT(nb2 <= nb3);
 
     // broadcast factors
-    const int64_t rk2 = neq2/nek2;
-    const int64_t rk3 = neq3/nek3;
+    const int64_t rk2 = neq2/nek2; // head_q / head_kv
+    const int64_t rk3 = neq3/nek3; // batch_q / batch_kv = 1
 
     const int64_t rv2 = neq2/nev2;
     const int64_t rv3 = neq3/nev3;
@@ -11147,10 +11146,12 @@ static void ggml_compute_forward_sparse_flash_attn_ext_f16(
         // online softmax / attention
         // loop over n_kv and n_head_kv
         // ref: https://arxiv.org/pdf/2112.05682.pdf
+        char * selected_ic_base_ptr = (char *) index->data + (ii2*nbi2 + ii3*nbi3);
+        int32_t * selected_ic_ptr;
         for (int64_t ic = 0; ic < nei1; ++ic) {
             // printf("thread %d of %d, loop over k and v, selected index-id: %ld, selected-id: %ld\n", ith, nth, ic, ic*nbi1 + ii2*nbi2 + ii3*nbi3);
-            const int64_t * selected_ic_ptr = (const int64_t *) ((char *) index->data + (ic*nbi1 + ii2*nbi2 + ii3*nbi3));
-            int64_t selected_ic = *selected_ic_ptr;
+            selected_ic_ptr = (int32_t *) (selected_ic_base_ptr + ic*nbi1);
+            int32_t selected_ic = *selected_ic_ptr;
             // printf("selected ic: %ld\n", selected_ic);
             // if (ith == 0) {
             // }
@@ -11161,7 +11162,7 @@ static void ggml_compute_forward_sparse_flash_attn_ext_f16(
 
             float s; // KQ value
 
-            const char * k_data = (const char *) k->data + ( selected_ic*nbk1 + ik2*nbk2 + ik3*nbk3);
+            const char * k_data = (const char *) k->data + ( selected_ic *nbk1 + ik2*nbk2 + ik3*nbk3);
             kq_vec_dot(D, &s, 0, k_data, 0, Q_q, 0, 1);
 
             s = s*scale; // scale KQ value
@@ -11177,7 +11178,7 @@ static void ggml_compute_forward_sparse_flash_attn_ext_f16(
             float ms = 1.0f; // upon new higher max val, scale VKQ and KQ sum with this value
             float vs = 1.0f; // post-softmax KQ value, expf(s - M)
 
-            const char * v_data = ((const char *) v->data + (selected_ic*nbv1 + iv2*nbv2 + iv3*nbv3));
+            const char * v_data = ((const char *) v->data + (selected_ic *nbv1 + iv2*nbv2 + iv3*nbv3));
 
             if (v->type == GGML_TYPE_F16) {
                 if (s > M) {
@@ -14157,14 +14158,14 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         /*.wdata     =*/ cplan->work_data,
         /*.threadpool=*/ tp,
     };
-    // clock_gettime(CLOCK_MONOTONIC, &time2);
+    // // clock_gettime(CLOCK_MONOTONIC, &time2);
 
     for (int node_n = 0; node_n < cgraph->n_nodes && !tp->abort; node_n++) {
         struct ggml_tensor * node = cgraph->nodes[node_n];
         // ggml_barrier(state->threadpool);
         // if (state->ith == 0 && node->op == GGML_OP_FLASH_ATTN_EXT) {
         // if (state->ith == 0) {
-        //     clock_gettime(CLOCK_MONOTONIC, &start);
+        //     // clock_gettime(CLOCK_MONOTONIC, &start);
         // }
         ggml_compute_forward(&params, node);
 
@@ -14177,12 +14178,12 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         ggml_barrier(state->threadpool);
         // if (state->ith == 0 && node->op == GGML_OP_FLASH_ATTN_EXT) {
         // if (state->ith == 0) {
-        //     clock_gettime(CLOCK_MONOTONIC, &end);  // 获取结束时刻
+        //     // clock_gettime(CLOCK_MONOTONIC, &end);  // 获取结束时刻
         //     double time_taken = (end.tv_sec - start.tv_sec) * 1000000.0 + (end.tv_nsec - start.tv_nsec) / 1000.0;
         //     printf("node %d time taken: %f us\n", node_n, time_taken);
         // }
     }
-    // clock_gettime(CLOCK_MONOTONIC, &time3);
+    // // clock_gettime(CLOCK_MONOTONIC, &time3);
     // if (state->ith == 0) {
         // double time_taken_1 = (time2.tv_sec - time1.tv_sec) * 1000000.0 + (time2.tv_nsec - time1.tv_nsec) / 1000.0;
         // double time_taken_2 = (time3.tv_sec - time2.tv_sec) * 1000000.0 + (time3.tv_nsec - time2.tv_nsec) / 1000.0;
@@ -14412,6 +14413,7 @@ struct ggml_threadpool * ggml_threadpool_new(struct ggml_threadpool_params * tpp
 
 enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cplan * cplan) {
     // struct timespec time1, time2, time3, time4, time5;
+    // double sum = 0.0;
     // clock_gettime(CLOCK_MONOTONIC, &time1);
     ggml_cpu_init();
 
@@ -14445,6 +14447,9 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
     if (n_threads > 1) {
         #pragma omp parallel num_threads(n_threads)
         {
+            // struct timespec ttime0, ttime1;
+        // #pragma omp barrier
+        //     clock_gettime(CLOCK_MONOTONIC, &ttime0);
             #pragma omp single
             {
                 // update the number of threads from the actual number of threads that we got from OpenMP
@@ -14452,6 +14457,11 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
                 atomic_store_explicit(&threadpool->n_threads_cur, n_threads, memory_order_relaxed);
             }
             ggml_graph_compute_thread(&threadpool->workers[omp_get_thread_num()]);
+        // #pragma omp barrier
+        //     clock_gettime(CLOCK_MONOTONIC, &ttime1);
+            // double ttiem_taken = (ttime1.tv_sec - ttime0.tv_sec) * 1000000.0 + (ttime1.tv_nsec - ttime0.tv_nsec) / 1000.0;
+            // sum += ttiem_taken;
+            // printf("Ttime: %f us\n", ttiem_taken);
         }
     } else {
         atomic_store_explicit(&threadpool->n_threads_cur, 1, memory_order_relaxed);
@@ -14486,8 +14496,9 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
     // printf("Duration time 1: %f us\n", time_taken_1);
     // printf("Duration time 2: %f us\n", time_taken_2);
     // printf("Duration time 3: %f us\n", time_taken_3);
+    // printf("Duration avg ttime: %f us\n", sum / n_threads);
     // printf("Duration time 4: %f us\n", time_taken_4);
-
+// 
     return ret;
 }
 
