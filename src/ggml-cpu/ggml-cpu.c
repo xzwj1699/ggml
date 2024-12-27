@@ -11206,6 +11206,7 @@ static void ggml_compute_forward_sparse_flash_attn_ext_f16(
         char * v_data_base_ptr = (char *) v->data + (iv2*nbv2 + iv3*nbv3);
 
         const int stage = 6;
+        const int total_stage = stage + 1;
         int32_t selected_ics[stage + 1];
 
         int32_t *selected_ic_ptr;
@@ -11225,15 +11226,15 @@ static void ggml_compute_forward_sparse_flash_attn_ext_f16(
             if (ic < nei1 - stage){
                 int32_t prefetch_index = (ic+stage);
                 selected_ic_ptr = (int32_t *) (selected_ic_base_ptr + prefetch_index * nbi1);
-                selected_ics[prefetch_index % (stage + 1)] = *selected_ic_ptr;
-                char * next_k_data = (char *) k_data_base_ptr + (selected_ics[prefetch_index % (stage + 1)] *nbk1);
+                selected_ics[prefetch_index % total_stage] = *selected_ic_ptr;
+                char * next_k_data = (char *) k_data_base_ptr + (selected_ics[prefetch_index % total_stage] *nbk1);
                 
                 const int prefetch_level = 1;
                 prefetch_4_cacheline(next_k_data, prefetch_level);
             }   
 
 
-            int32_t selected_ic = selected_ics[ic % (stage + 1)];
+            int32_t selected_ic = selected_ics[ic % total_stage];
             
 
             const char * k_data = (const char *) k_data_base_ptr + (selected_ic *nbk1);
@@ -11267,7 +11268,7 @@ static void ggml_compute_forward_sparse_flash_attn_ext_f16(
 
             if (ic < nei1 - stage){
                 int32_t prefetch_index = (ic+stage);
-                char * next_v_data = (char *) v_data_base_ptr + (selected_ics[prefetch_index % (stage + 1)] *nbv1);
+                char * next_v_data = (char *) v_data_base_ptr + (selected_ics[prefetch_index % total_stage] *nbv1);
                 const int prefetch_level = 1;
                 prefetch_4_cacheline(next_v_data, prefetch_level);
             }   
