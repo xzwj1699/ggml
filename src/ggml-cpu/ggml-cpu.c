@@ -10744,6 +10744,14 @@ void ggml_print_tensor_fa(const struct ggml_tensor * tensor) {
     printf("tensor type: %d, shape: %ld,%ld,%ld,%ld, op: %d, flags: %d, name: %s\n", tensor->type, tensor->ne[0], tensor->ne[1], tensor->ne[2], tensor->ne[3], tensor->op, tensor->flags, tensor->name);
 }
 
+inline void prefetch_4_cacheline(char* ptr, int prefetch_level){
+    __builtin_prefetch(ptr, 0, prefetch_level);
+    __builtin_prefetch(ptr + 64, 0, prefetch_level);
+    __builtin_prefetch(ptr + 128, 0, prefetch_level);
+    __builtin_prefetch(ptr + 192, 0, prefetch_level);
+}
+
+
 static void ggml_compute_forward_flash_attn_ext_f16(
         const struct ggml_compute_params * params,
         const struct ggml_tensor * q,
@@ -10892,46 +10900,8 @@ static void ggml_compute_forward_flash_attn_ext_f16(
             const char * v_data = ((const char *) v->data + (ic *nbv1 + iv2*nbv2 + iv3*nbv3));
 
             const int cur_prefetch_level = 3;
-            __builtin_prefetch(k_data + 0, 0, cur_prefetch_level);
-            __builtin_prefetch(k_data + 64, 0, cur_prefetch_level);
-            __builtin_prefetch(k_data + 128, 0, cur_prefetch_level);
-            __builtin_prefetch(k_data + 192, 0, cur_prefetch_level);
-            __builtin_prefetch(v_data + 0, 0, cur_prefetch_level);
-            __builtin_prefetch(v_data + 64, 0, cur_prefetch_level);
-            __builtin_prefetch(v_data + 128, 0, cur_prefetch_level);
-            __builtin_prefetch(v_data + 192, 0, cur_prefetch_level);
-
-            const int stage = 6;
-            if (ic < nek1 - stage){
-                // selected_ic_ptr = (int32_t *) (selected_ic_base_ptr + (ic+1)*nbi1);
-                // int32_t next_selected_ic = *selected_ic_ptr;
-                const char * next_k_data = (const char *) k->data + ( (ic + stage) *nbk1 + ik2*nbk2 + ik3*nbk3);
-                const char * next_v_data = ((const char *) v->data + ((ic + stage) *nbv1 + iv2*nbv2 + iv3*nbv3));
-                const int cur_prefetch_level = 3;
-                const int prefetch_level = 1;
-
-                __builtin_prefetch(k_data + 0, 0, cur_prefetch_level);
-                __builtin_prefetch(k_data + 64, 0, cur_prefetch_level);
-                __builtin_prefetch(k_data + 128, 0, cur_prefetch_level);
-                __builtin_prefetch(k_data + 192, 0, cur_prefetch_level);
-                __builtin_prefetch(v_data + 0, 0, cur_prefetch_level);
-                __builtin_prefetch(v_data + 64, 0, cur_prefetch_level);
-                __builtin_prefetch(v_data + 128, 0, cur_prefetch_level);
-                __builtin_prefetch(v_data + 192, 0, cur_prefetch_level);
-
-
-                __builtin_prefetch(next_k_data + 0, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 64, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 128, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 192, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 0, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 64, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 128, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 192, 0, prefetch_level);
-
-
-            }   
-            
+            prefetch_4_cacheline(k_data, cur_prefetch_level);
+            prefetch_4_cacheline(v_data, cur_prefetch_level);
 
             // if (ith == 0) {
             //     printf("loop over kv, index: %ld\n", ic);
@@ -11036,13 +11006,6 @@ static void ggml_compute_forward_flash_attn_ext(
                 GGML_ABORT("fatal error");
             }
     }
-}
-
-inline void prefetch_4_cacheline(char* ptr, int prefetch_level){
-    __builtin_prefetch(ptr, 0, prefetch_level);
-    __builtin_prefetch(ptr + 64, 0, prefetch_level);
-    __builtin_prefetch(ptr + 128, 0, prefetch_level);
-    __builtin_prefetch(ptr + 192, 0, prefetch_level);
 }
 
 // ggml_compute_forward_sparse_flash_attn_ext
