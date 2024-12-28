@@ -11489,8 +11489,8 @@ static void ggml_compute_forward_sparse_flash_attn_with_meta_ext_f16(
         for (int64_t ic = 0; ic < nei1; ++ic) {
             // printf("thread %d of %d, loop over k and v, selected index-id: %ld, selected-id: %ld\n", ith, nth, ic, ic*nbi1 + ii2*nbi2 + ii3*nbi3);
             // printf("select metadata, ic: %ld, ii2: %ld, ii3: %d, nbi1: %ld, nbi2: %ld, nbi3: %ld\n", ic, ii2, ii3, nbi1, nbi2, nbi3);
-            const int64_t * selected_ic_ptr = (const int64_t *) ((char *) index->data + (ic*nbi1 + ii2*nbi2 + ii3*nbi3));
-            int64_t selected_ic = *selected_ic_ptr;
+            const int32_t * selected_ic_ptr = (const int32_t *) ((char *) index->data + (ic*nbi1 + ii2*nbi2 + ii3*nbi3));
+            int32_t selected_ic = *selected_ic_ptr;
             // printf("selected ic: %ld\n", selected_ic);
             const float mv = mp ? slope*GGML_FP16_TO_FP32(mp[selected_ic]) : 0.0f;
             if (mv == -INFINITY) {
