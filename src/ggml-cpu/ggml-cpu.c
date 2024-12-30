@@ -10744,6 +10744,14 @@ void ggml_print_tensor_fa(const struct ggml_tensor * tensor) {
     printf("tensor type: %d, shape: %ld,%ld,%ld,%ld, op: %d, flags: %d, name: %s\n", tensor->type, tensor->ne[0], tensor->ne[1], tensor->ne[2], tensor->ne[3], tensor->op, tensor->flags, tensor->name);
 }
 
+inline void prefetch_4_cacheline(char* ptr, int prefetch_level){
+    __builtin_prefetch(ptr, 0, prefetch_level);
+    __builtin_prefetch(ptr + 64, 0, prefetch_level);
+    __builtin_prefetch(ptr + 128, 0, prefetch_level);
+    __builtin_prefetch(ptr + 192, 0, prefetch_level);
+}
+
+
 static void ggml_compute_forward_flash_attn_ext_f16(
         const struct ggml_compute_params * params,
         const struct ggml_tensor * q,
@@ -10891,37 +10899,9 @@ static void ggml_compute_forward_flash_attn_ext_f16(
             const char * k_data = (const char *) k->data + ( ic *nbk1 + ik2*nbk2 + ik3*nbk3);
             const char * v_data = ((const char *) v->data + (ic *nbv1 + iv2*nbv2 + iv3*nbv3));
 
-
-            if (ic < nek1 - 1){
-                // selected_ic_ptr = (int32_t *) (selected_ic_base_ptr + (ic+1)*nbi1);
-                // int32_t next_selected_ic = *selected_ic_ptr;
-                const char * next_k_data = (const char *) k->data + ( (ic + 1) *nbk1 + ik2*nbk2 + ik3*nbk3);
-                const char * next_v_data = ((const char *) v->data + ((ic + 1) *nbv1 + iv2*nbv2 + iv3*nbv3));
-                const int cur_prefetch_level = 3;
-                const int prefetch_level = 1;
-
-                __builtin_prefetch(k_data + 0, 0, cur_prefetch_level);
-                __builtin_prefetch(k_data + 64, 0, cur_prefetch_level);
-                __builtin_prefetch(k_data + 128, 0, cur_prefetch_level);
-                __builtin_prefetch(k_data + 192, 0, cur_prefetch_level);
-                __builtin_prefetch(v_data + 0, 0, cur_prefetch_level);
-                __builtin_prefetch(v_data + 64, 0, cur_prefetch_level);
-                __builtin_prefetch(v_data + 128, 0, cur_prefetch_level);
-                __builtin_prefetch(v_data + 192, 0, cur_prefetch_level);
-
-
-                __builtin_prefetch(next_k_data + 0, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 64, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 128, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 192, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 0, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 64, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 128, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 192, 0, prefetch_level);
-
-
-            }   
-            
+            const int cur_prefetch_level = 3;
+            prefetch_4_cacheline(k_data, cur_prefetch_level);
+            prefetch_4_cacheline(v_data, cur_prefetch_level);
 
             // if (ith == 0) {
             //     printf("loop over kv, index: %ld\n", ic);
@@ -11183,132 +11163,49 @@ static void ggml_compute_forward_sparse_flash_attn_ext_f16(
         // loop over n_kv and n_head_kv
         // ref: https://arxiv.org/pdf/2112.05682.pdf
         char * selected_ic_base_ptr = (char *) index->data + (ii2*nbi2 + ii3*nbi3);
-        int32_t * selected_ic_ptr;
+        __builtin_prefetch(selected_ic_base_ptr, 0, 3);
+
+        char * k_data_base_ptr = (char *) k->data + (ik2*nbk2 + ik3*nbk3);
+        char * v_data_base_ptr = (char *) v->data + (iv2*nbv2 + iv3*nbv3);
+
+        const int stage = 6;
+        const int total_stage = stage + 1;
+        int32_t selected_ics[stage + 1];
+
+        int32_t *selected_ic_ptr;
         for (int64_t ic = 0; ic < nei1; ++ic) {
             // printf("thread %d of %d, loop over k and v, selected index-id: %ld, selected-id: %ld\n", ith, nth, ic, ic*nbi1 + ii2*nbi2 + ii3*nbi3);
-            selected_ic_ptr = (int32_t *) (selected_ic_base_ptr + ic*nbi1);
-            int32_t selected_ic = *selected_ic_ptr;
+            if (ic == 0){
+                for (int k = 0; k < stage; k++){
+                    selected_ic_ptr = (int32_t *) (selected_ic_base_ptr + k * nbi1);
+                    selected_ics[k] = *selected_ic_ptr;
+                    char * next_k_data = (char *) k_data_base_ptr + (selected_ics[k] *nbk1);
 
-
-            const char * k_data = (const char *) k->data + ( selected_ic *nbk1 + ik2*nbk2 + ik3*nbk3);
-            const char * v_data = ((const char *) v->data + (selected_ic *nbv1 + iv2*nbv2 + iv3*nbv3));
-
-            const int cur_prefetch_level = 3;
-            __builtin_prefetch(k_data + 0, 0, cur_prefetch_level);
-            __builtin_prefetch(k_data + 64, 0, cur_prefetch_level);
-            __builtin_prefetch(k_data + 128, 0, cur_prefetch_level);
-            __builtin_prefetch(k_data + 192, 0, cur_prefetch_level);
-            __builtin_prefetch(v_data + 0, 0, cur_prefetch_level);
-            __builtin_prefetch(v_data + 64, 0, cur_prefetch_level);
-            __builtin_prefetch(v_data + 128, 0, cur_prefetch_level);
-            __builtin_prefetch(v_data + 192, 0, cur_prefetch_level);
-
-
-            // if (ic < nei1 - 1){
-            //     selected_ic_ptr = (int32_t *) (selected_ic_base_ptr + (ic+1)*nbi1);
-            //     int32_t next_selected_ic = *selected_ic_ptr;
-            //     const char * next_k_data = (const char *) k->data + ( next_selected_ic *nbk1 + ik2*nbk2 + ik3*nbk3);
-            //     const char * next_v_data = ((const char *) v->data + (next_selected_ic *nbv1 + iv2*nbv2 + iv3*nbv3));
-                
-            //     const int prefetch_level = 1;
-
-            //     __builtin_prefetch(next_k_data + 0, 0, prefetch_level);
-            //     __builtin_prefetch(next_k_data + 64, 0, prefetch_level);
-            //     __builtin_prefetch(next_k_data + 128, 0, prefetch_level);
-            //     __builtin_prefetch(next_k_data + 192, 0, prefetch_level);
-            //     __builtin_prefetch(next_v_data + 0, 0, prefetch_level);
-            //     __builtin_prefetch(next_v_data + 64, 0, prefetch_level);
-            //     __builtin_prefetch(next_v_data + 128, 0, prefetch_level);
-            //     __builtin_prefetch(next_v_data + 192, 0, prefetch_level);
-
-            // } 
-
-            // if (ic < nei1 - 2){
-            //     selected_ic_ptr = (int32_t *) (selected_ic_base_ptr + (ic+2)*nbi1);
-            //     int32_t next_selected_ic = *selected_ic_ptr;
-            //     const char * next_k_data = (const char *) k->data + ( next_selected_ic *nbk1 + ik2*nbk2 + ik3*nbk3);
-            //     const char * next_v_data = ((const char *) v->data + (next_selected_ic *nbv1 + iv2*nbv2 + iv3*nbv3));
-                
-            //     const int prefetch_level = 1;
-
-            //     __builtin_prefetch(next_k_data + 0, 0, prefetch_level);
-            //     __builtin_prefetch(next_k_data + 64, 0, prefetch_level);
-            //     __builtin_prefetch(next_k_data + 128, 0, prefetch_level);
-            //     __builtin_prefetch(next_k_data + 192, 0, prefetch_level);
-            //     __builtin_prefetch(next_v_data + 0, 0, prefetch_level);
-            //     __builtin_prefetch(next_v_data + 64, 0, prefetch_level);
-            //     __builtin_prefetch(next_v_data + 128, 0, prefetch_level);
-            //     __builtin_prefetch(next_v_data + 192, 0, prefetch_level);
-
-            // } 
-
-            const int ____stage = 2;
-            if (ic < nei1 - ____stage){
-                selected_ic_ptr = (int32_t *) (selected_ic_base_ptr + (ic+____stage)*nbi1);
-                int32_t next_selected_ic = *selected_ic_ptr;
-                const char * next_k_data = (const char *) k->data + ( next_selected_ic *nbk1 + ik2*nbk2 + ik3*nbk3);
-                const char * next_v_data = ((const char *) v->data + (next_selected_ic *nbv1 + iv2*nbv2 + iv3*nbv3));
-                
-                const int prefetch_level = 3;
-
-                __builtin_prefetch(next_k_data + 0, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 64, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 128, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 192, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 0, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 64, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 128, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 192, 0, prefetch_level);
-
-            }   
-
-            const int ___stage = 3;
-            if (ic < nei1 - ___stage){
-                selected_ic_ptr = (int32_t *) (selected_ic_base_ptr + (ic+___stage)*nbi1);
-                int32_t next_selected_ic = *selected_ic_ptr;
-                const char * next_k_data = (const char *) k->data + ( next_selected_ic *nbk1 + ik2*nbk2 + ik3*nbk3);
-                const char * next_v_data = ((const char *) v->data + (next_selected_ic *nbv1 + iv2*nbv2 + iv3*nbv3));
-                
-                const int prefetch_level = 2;
-
-                __builtin_prefetch(next_k_data + 0, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 64, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 128, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 192, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 0, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 64, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 128, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 192, 0, prefetch_level);
-
-            }   
-
-        
-            const int stage = 6;
+                    const int prefetch_level = 1;
+                    prefetch_4_cacheline(next_k_data, prefetch_level);
+                }
+            }
+            
             if (ic < nei1 - stage){
-                selected_ic_ptr = (int32_t *) (selected_ic_base_ptr + (ic+stage)*nbi1);
-                int32_t next_selected_ic = *selected_ic_ptr;
-                const char * next_k_data = (const char *) k->data + ( next_selected_ic *nbk1 + ik2*nbk2 + ik3*nbk3);
-                const char * next_v_data = ((const char *) v->data + (next_selected_ic *nbv1 + iv2*nbv2 + iv3*nbv3));
+                int32_t prefetch_index = (ic+stage);
+                selected_ic_ptr = (int32_t *) (selected_ic_base_ptr + prefetch_index * nbi1);
+                selected_ics[prefetch_index % total_stage] = *selected_ic_ptr;
+                char * next_k_data = (char *) k_data_base_ptr + (selected_ics[prefetch_index % total_stage] *nbk1);
                 
                 const int prefetch_level = 1;
-
-                __builtin_prefetch(next_k_data + 0, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 64, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 128, 0, prefetch_level);
-                __builtin_prefetch(next_k_data + 192, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 0, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 64, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 128, 0, prefetch_level);
-                __builtin_prefetch(next_v_data + 192, 0, prefetch_level);
-
+                prefetch_4_cacheline(next_k_data, prefetch_level);
             }   
-            
-            
 
 
+            int32_t selected_ic = selected_ics[ic % total_stage];
             
-            
-            //__builtin_prefetch(k_data, 0, 3);
+
+            const char * k_data = (const char *) k_data_base_ptr + (selected_ic *nbk1);
+            const char * v_data = (const char *) v_data_base_ptr + (selected_ic *nbv1);
+
+            const int cur_prefetch_level = 3;
+            prefetch_4_cacheline(k_data, cur_prefetch_level);
+            prefetch_4_cacheline(v_data, cur_prefetch_level);
             
 
 
@@ -11321,6 +11218,25 @@ static void ggml_compute_forward_sparse_flash_attn_ext_f16(
 
             
             ggml_vec_dot_f16(D, &s, 0, k_data, 0, Q_q, 0, 1);
+
+
+
+            if (ic == 0){
+                for (int k = 0; k < stage; k++){
+                    char * next_v_data = (char *) v_data_base_ptr + (selected_ics[k] *nbv1);
+                    const int prefetch_level = 1;
+                    prefetch_4_cacheline(next_v_data, prefetch_level);
+                }
+            }
+
+            if (ic < nei1 - stage){
+                int32_t prefetch_index = (ic+stage);
+                char * next_v_data = (char *) v_data_base_ptr + (selected_ics[prefetch_index % total_stage] *nbv1);
+                const int prefetch_level = 1;
+                prefetch_4_cacheline(next_v_data, prefetch_level);
+            }   
+
+
             
             s = s*scale; // scale KQ value
 
@@ -11573,8 +11489,8 @@ static void ggml_compute_forward_sparse_flash_attn_with_meta_ext_f16(
         for (int64_t ic = 0; ic < nei1; ++ic) {
             // printf("thread %d of %d, loop over k and v, selected index-id: %ld, selected-id: %ld\n", ith, nth, ic, ic*nbi1 + ii2*nbi2 + ii3*nbi3);
             // printf("select metadata, ic: %ld, ii2: %ld, ii3: %d, nbi1: %ld, nbi2: %ld, nbi3: %ld\n", ic, ii2, ii3, nbi1, nbi2, nbi3);
-            const int64_t * selected_ic_ptr = (const int64_t *) ((char *) index->data + (ic*nbi1 + ii2*nbi2 + ii3*nbi3));
-            int64_t selected_ic = *selected_ic_ptr;
+            const int32_t * selected_ic_ptr = (const int32_t *) ((char *) index->data + (ic*nbi1 + ii2*nbi2 + ii3*nbi3));
+            int32_t selected_ic = *selected_ic_ptr;
             // printf("selected ic: %ld\n", selected_ic);
             const float mv = mp ? slope*GGML_FP16_TO_FP32(mp[selected_ic]) : 0.0f;
             if (mv == -INFINITY) {
